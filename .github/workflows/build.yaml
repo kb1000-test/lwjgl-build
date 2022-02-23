@@ -1,0 +1,32 @@
+name: build
+on: [push]
+
+jobs:
+  lwjgl3:
+    strategy:
+      matrix:
+        os: [ubuntu-18.04]
+        version: [3.2.2]
+
+    env:
+      LWJGL_BUILD_TYPE: release/${{ matrix.version }}
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v2
+      - name: install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get -y upgrade
+          sudo apt-get -y install libgl-dev libgtk-3-dev xorg-dev libglu-dev libgl1-mesa-glx
+      - name: setup jdk 8
+        uses: actions/setup-java@v2
+        with:
+          distribution: zulu
+          java-version: 8
+      - name: clone LWJGL
+        run: git clone -b ${{ matrix.version }} --depth 1 https://github.com/LWJGL/lwjgl3.git lwjgl3/lwjgl3
+      - name: run build
+        working-directory: lwjgl3/lwjgl3
+        run: ant
