@@ -5,7 +5,7 @@ jobs:
   lwjgl3:
     strategy:
       matrix:
-        os: [ubuntu-18.04]
+        os: [ubuntu-18.04, macos-10.15]
         version: [3.2.2]
 
     env:
@@ -16,6 +16,7 @@ jobs:
       - name: checkout repository
         uses: actions/checkout@v2
       - name: install dependencies
+        if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
           sudo apt-get -y upgrade
