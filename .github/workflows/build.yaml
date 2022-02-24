@@ -5,10 +5,12 @@ jobs:
   lwjgl3:
     strategy:
       matrix:
-        os: [ubuntu-18.04, macos-10.15]
+        os: [ubuntu-18.04, macos-10.15, windows-2019]
         version: [3.2.2]
+        arch: [x64]
 
     env:
+      LWJGL_BUILD_ARCH: ${{ matrix.arch }}
       LWJGL_BUILD_TYPE: release/${{ matrix.version }}
       MACOSX_DEPLOYMENT_TARGET: "10.9"
 
@@ -33,11 +35,26 @@ jobs:
       - name: patch LWJGL
         working-directory: lwjgl3
         run: ../patcher
+      - name: setup architecture variables
+        shell: bash
+        run: |
+          if [ $LWJGL_BUILD_ARCH = x64 ]; then
+              echo MSVC_ARCH=amd64 >> $GITHUB_ENV
+          fi
+
       - name: setup macOS SDK
         if: ${{ runner.os == 'macOS' }}
         run: |
           sudo xcode-select -switch /Applications/Xcode_10.3.app
           echo "SDKROOT_PROP=-Dsdkroot=$(xcrun -sdk macosx10.14 --show-sdk-path)" >> $GITHUB_ENV
-      - name: run build-
+      - name: run build
         working-directory: lwjgl3/lwjgl3
-        run: ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile
+        if: ${{ runner.os != 'Windows' }}
+        run: ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile compile-native
+      - name: run build (Windows)
+        working-directory: lwjgl3/lwjgl3
+        if: ${{ runner.os == 'Windows' }}
+        shell: cmd
+        run: |
+          call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" ${{ env.MSVC_ARCH }}
+          ant compile-templates clean-generated generate compile compile-native
