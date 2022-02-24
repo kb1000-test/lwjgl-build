@@ -47,6 +47,7 @@ jobs:
         run: |
           sudo xcode-select -switch /Applications/Xcode_10.3.app
           echo "SDKROOT_PROP=-Dsdkroot=$(xcrun -sdk macosx10.14 --show-sdk-path)" >> $GITHUB_ENV
+          echo "SDKROOT=$(xcrun -sdk macosx10.14 --show-sdk-path)" >> $GITHUB_ENV
       - name: run build
         working-directory: lwjgl3/lwjgl3
         if: ${{ runner.os != 'Windows' }}
