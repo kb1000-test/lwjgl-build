@@ -1,0 +1,119 @@
+From a10f862428d412087bc9a98018097aefcc9a2364 Mon Sep 17 00:00:00 2001
+From: Ioannis Tsakpinis <iotsakp@gmail.com>
+Date: Sun, 31 Oct 2021 00:35:51 +0300
+Subject: [PATCH] fix(core): encoding of dlopen paths. Close #691
+
+---
+ doc/notes/3.3.0.md                                              | 1 +
+ .../java/org/lwjgl/system/linux/DynamicLinkLoader.java          | 2 +-
+ .../java/org/lwjgl/system/macosx/DynamicLinkLoader.java         | 2 +-
+ .../core/src/main/java/org/lwjgl/system/linux/LinuxLibrary.java | 2 +-
+ .../main/java/org/lwjgl/system/macosx/MacOSXLibraryBundle.java  | 2 +-
+ .../src/main/java/org/lwjgl/system/macosx/MacOSXLibraryDL.java  | 2 +-
+ .../templates/kotlin/core/linux/templates/DynamicLinkLoader.kt  | 2 +-
+ .../templates/kotlin/core/macos/templates/DynamicLinkLoader.kt  | 2 +-
+ 8 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/doc/notes/3.3.0.md b/doc/notes/3.3.0.md
+index c10a4f0dab..fc1050589e 100644
+--- a/doc/notes/3.3.0.md
++++ b/doc/notes/3.3.0.md
+@@ -119,6 +119,7 @@ This build includes the following changes:
+ - Core: Fixed unsafe field reads in `MemoryUtil` setup code. (#632)
+ - Core: The `SharedLibraryLoader` now prepends a `.` to `SHARED_LIBRARY_EXTRACT_DIRECTORY` when the target directory is not temporary.
+ - Core: The `SharedLibraryLoader` will now load libraries in the correct `ClassLoader` when testing for [JDK-8195129](https://bugs.openjdk.java.net/browse/JDK-8195129). (#648)
++- Core: Changed the encoding of `dlopen` paths to UTF-8. (#691) 
+ - EGL: Fixed nullability of `eglInitialize` arguments.
+ - GLFW: Fixed main thread check. Setting `GLFW_CHECK_THREAD0` to `false` is now required for offscreen interop. (#538)
+ - OpenCL: Added missing `errcode_ret` parameter to `clLinkProgram`. (#560)
+diff --git a/modules/lwjgl/core/src/generated/java/org/lwjgl/system/linux/DynamicLinkLoader.java b/modules/lwjgl/core/src/generated/java/org/lwjgl/system/linux/DynamicLinkLoader.java
+index 00664c6205..cb9170ae59 100644
+--- a/modules/lwjgl/core/src/generated/java/org/lwjgl/system/linux/DynamicLinkLoader.java
++++ b/modules/lwjgl/core/src/generated/java/org/lwjgl/system/linux/DynamicLinkLoader.java
+@@ -78,7 +78,7 @@ public static long dlopen(@Nullable @NativeType("char const *") ByteBuffer filen
+     public static long dlopen(@Nullable @NativeType("char const *") CharSequence filename, int mode) {
+         MemoryStack stack = stackGet(); int stackPointer = stack.getPointer();
+         try {
+-            stack.nASCIISafe(filename, true);
++            stack.nUTF8Safe(filename, true);
+             long filenameEncoded = filename == null ? NULL : stack.getPointerAddress();
+             return ndlopen(filenameEncoded, mode);
+         } finally {
+diff --git a/modules/lwjgl/core/src/generated/java/org/lwjgl/system/macosx/DynamicLinkLoader.java b/modules/lwjgl/core/src/generated/java/org/lwjgl/system/macosx/DynamicLinkLoader.java
+index 64fae1f633..525b419fae 100644
+--- a/modules/lwjgl/core/src/generated/java/org/lwjgl/system/macosx/DynamicLinkLoader.java
++++ b/modules/lwjgl/core/src/generated/java/org/lwjgl/system/macosx/DynamicLinkLoader.java
+@@ -171,7 +171,7 @@ public static long dlopen(@Nullable @NativeType("char const *") ByteBuffer path,
+     public static long dlopen(@Nullable @NativeType("char const *") CharSequence path, int mode) {
+         MemoryStack stack = stackGet(); int stackPointer = stack.getPointer();
+         try {
+-            stack.nASCIISafe(path, true);
++            stack.nUTF8Safe(path, true);
+             long pathEncoded = path == null ? NULL : stack.getPointerAddress();
+             return ndlopen(pathEncoded, mode);
+         } finally {
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/linux/LinuxLibrary.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/linux/LinuxLibrary.java
+index 43e9b7dfc6..0cabe46b74 100644
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/linux/LinuxLibrary.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/linux/LinuxLibrary.java
+@@ -27,7 +27,7 @@ public LinuxLibrary(String name, long handle) {
+     private static long loadLibrary(String name) {
+         long handle;
+         try (MemoryStack stack = stackPush()) {
+-            handle = dlopen(stack.ASCII(name), RTLD_LAZY | RTLD_LOCAL);
++            handle = dlopen(stack.UTF8(name), RTLD_LAZY | RTLD_LOCAL);
+         }
+         if (handle == NULL) {
+             throw new UnsatisfiedLinkError("Failed to dynamically load library: " + name + "(error = " + dlerror() + ")");
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryBundle.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryBundle.java
+index 35db5c0ec9..536b6a061c 100644
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryBundle.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryBundle.java
+@@ -24,7 +24,7 @@ public MacOSXLibraryBundle(String name, long bundleRef) {
+     public static MacOSXLibraryBundle getWithIdentifier(String bundleID) {
+         long filePath = NULL;
+         try (MemoryStack stack = stackPush()) {
+-            filePath = CString2CFString(stack.ASCII(bundleID), kCFStringEncodingASCII);
++            filePath = CString2CFString(stack.UTF8(bundleID), kCFStringEncodingUTF8);
+ 
+             long bundleRef = CFBundleGetBundleWithIdentifier(filePath);
+             if (bundleRef == NULL) {
+diff --git a/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryDL.java b/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryDL.java
+index a0602cb7c3..8acb30895f 100644
+--- a/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryDL.java
++++ b/modules/lwjgl/core/src/main/java/org/lwjgl/system/macosx/MacOSXLibraryDL.java
+@@ -27,7 +27,7 @@ public MacOSXLibraryDL(String name, long handle) {
+     private static long loadLibrary(String name) {
+         long handle;
+         try (MemoryStack stack = stackPush()) {
+-            handle = dlopen(stack.ASCII(name), RTLD_LAZY | RTLD_LOCAL);
++            handle = dlopen(stack.UTF8(name), RTLD_LAZY | RTLD_LOCAL);
+         }
+         if (handle == NULL) {
+             throw new UnsatisfiedLinkError("Failed to dynamically load library: " + name + "(error = " + dlerror() + ")");
+diff --git a/modules/lwjgl/core/src/templates/kotlin/core/linux/templates/DynamicLinkLoader.kt b/modules/lwjgl/core/src/templates/kotlin/core/linux/templates/DynamicLinkLoader.kt
+index ed917de636..f4b7a04d38 100644
+--- a/modules/lwjgl/core/src/templates/kotlin/core/linux/templates/DynamicLinkLoader.kt
++++ b/modules/lwjgl/core/src/templates/kotlin/core/linux/templates/DynamicLinkLoader.kt
+@@ -55,7 +55,7 @@ val dlfcn = "DynamicLinkLoader".nativeClass(Module.CORE_LINUX, nativeSubPath = "
+         {@code filename} is #NULL, then the returned handle is for the main program.
+         """,
+ 
+-        nullable..charASCII.const.p("filename", "the name of the dynamic library to open, or #NULL"),
++        nullable..charUTF8.const.p("filename", "the name of the dynamic library to open, or #NULL"),
+         int("mode", "a bitfield", Modes, LinkMode.BITFIELD)
+     )
+ 
+diff --git a/modules/lwjgl/core/src/templates/kotlin/core/macos/templates/DynamicLinkLoader.kt b/modules/lwjgl/core/src/templates/kotlin/core/macos/templates/DynamicLinkLoader.kt
+index 16d0fc2a18..c754c62b80 100644
+--- a/modules/lwjgl/core/src/templates/kotlin/core/macos/templates/DynamicLinkLoader.kt
++++ b/modules/lwjgl/core/src/templates/kotlin/core/macos/templates/DynamicLinkLoader.kt
+@@ -71,7 +71,7 @@ val dlfcn = "DynamicLinkLoader".nativeClass(Module.CORE_MACOS, nativeSubPath = "
+         )}
+         """,
+ 
+-        nullable..charASCII.const.p("path", "path to the image to open"),
++        nullable..charUTF8.const.p("path", "path to the image to open"),
+         int(
+             "mode",
+             """

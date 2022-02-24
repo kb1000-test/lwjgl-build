@@ -27,6 +27,9 @@ jobs:
           java-version: 8
       - name: clone LWJGL
         run: git clone -b ${{ matrix.version }} --depth 1 https://github.com/LWJGL/lwjgl3.git lwjgl3/lwjgl3
+      - name: patch LWJGL
+        working-directory: lwjgl3
+        run: ../patcher
       - name: run build
         working-directory: lwjgl3/lwjgl3
-        run: ant
+        run: ant compile-templates generate compile

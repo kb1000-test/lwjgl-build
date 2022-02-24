@@ -1,0 +1,23 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+
+ns = dict(zip(("versioh", "os", "arch"), sys.argv[1:]))
+
+with open("patches.json", "r", encoding="ascii") as fp:
+    patch_config = json.loads(fp.read())
+
+patch_files = sorted(((int(f.partition("-")[0]), f) for f in os.listdir("patches")), key=lambda i: i[0])
+patch_configs = {int(k): v for k, v in patch_config["patches"].items()}
+
+for p_id, patch in patch_files:
+    config = patch_configs.get(p_id, {})
+    cond = config.get("condition")
+    if cond and not eval(cond, globals=ns):
+        print(f"Skipping {patch}")
+        continue
+    print(f"Applying {patch}")
+    patch = os.path.realpath(os.path.join("patches", patch))
+    subprocess.check_call(["git", "apply", *(f"--exclude={exclude}" for exclude in patch_config.get("excludes", ())), patch], cwd=patch_config["repo"])
