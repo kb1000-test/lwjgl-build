@@ -35,7 +35,9 @@ jobs:
         run: ../patcher
       - name: setup macOS SDK
         if: ${{ runner.os == 'macOS' }}
-        run: echo "SDKROOT_PROP=-Dsdkroot=$(xcrun -sdk macosx10.9 --show-sdk-path)" >> $GITHUB_ENV
+        run: |
+          sudo xcode-select -switch /Applications/Xcode_10.3.app
+          echo "SDKROOT_PROP=-Dsdkroot=$(xcrun -sdk macosx10.14 --show-sdk-path)" >> $GITHUB_ENV
       - name: run build-
         working-directory: lwjgl3/lwjgl3
         run: ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile
