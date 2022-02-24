@@ -10,12 +10,14 @@ jobs:
 
     env:
       LWJGL_BUILD_TYPE: release/${{ matrix.version }}
+      MACOSX_DEPLOYMENT_TARGET: "10.9"
 
     runs-on: ${{ matrix.os }}
     steps:
       - name: checkout repository
         uses: actions/checkout@v2
-      - name: install dependencies
+      - run: echo ${{ runner.os }}
+      - name: install dependencies (Ubuntu)
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
@@ -31,6 +33,9 @@ jobs:
       - name: patch LWJGL
         working-directory: lwjgl3
         run: ../patcher
-      - name: run build
+      - name: setup macOS SDK
+        if: ${{ runner.os == 'macOS' }}
+        run: echo "SDKROOT_PROP=-Dsdkroot=$(xcrun -sdk macosx10.9 --show-sdk-path)" >> $GITHUB_ENV
+      - name: run build-
         working-directory: lwjgl3/lwjgl3
-        run: ant compile-templates generate compile
+        run: ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile
