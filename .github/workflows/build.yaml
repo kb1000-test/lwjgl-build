@@ -126,3 +126,8 @@ jobs:
       - name: package
         working-directory: lwjgl3/lwjgl3
         run: ant release -Dbuild.revision=10-kb1000 -Dbuild.version=${{ matrix.version }}
+      - name: upload artifacts
+        uses: actions/upload-artifact@v2
+        with:
+          name: release-${{ matrix.version }}
+          path: lwjgl3/lwjgl3/bin/RELEASE/**/*.jar
