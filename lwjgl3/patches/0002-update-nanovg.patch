@@ -1,0 +1,472 @@
+diff --git a/modules/lwjgl/nanovg/src/main/c/fontstash.h b/modules/lwjgl/nanovg/src/main/c/fontstash.h
+index c0f5a4d94..295202c22 100644
+--- a/modules/lwjgl/nanovg/src/main/c/fontstash.h
++++ b/modules/lwjgl/nanovg/src/main/c/fontstash.h
+@@ -102,8 +102,8 @@ int fonsExpandAtlas(FONScontext* s, int width, int height);
+ int fonsResetAtlas(FONScontext* stash, int width, int height);
+ 
+ // Add fonts
+-int fonsAddFont(FONScontext* s, const char* name, const char* path);
+-int fonsAddFontMem(FONScontext* s, const char* name, unsigned char* data, int ndata, int freeData);
++int fonsAddFont(FONScontext* s, const char* name, const char* path, int fontIndex);
++int fonsAddFontMem(FONScontext* s, const char* name, unsigned char* data, int ndata, int freeData, int fontIndex);
+ int fonsGetFontByName(FONScontext* s, const char* name);
+ 
+ // State handling
+@@ -175,13 +175,13 @@ int fons__tt_done(FONScontext *context)
+ 	return ftError == 0;
+ }
+ 
+-int fons__tt_loadFont(FONScontext *context, FONSttFontImpl *font, unsigned char *data, int dataSize)
++int fons__tt_loadFont(FONScontext *context, FONSttFontImpl *font, unsigned char *data, int dataSize, int fontIndex)
+ {
+ 	FT_Error ftError;
+ 	FONS_NOTUSED(context);
+ 
+ 	//font->font.userdata = stash;
+-	ftError = FT_New_Memory_Face(ftLibrary, (const FT_Byte*)data, dataSize, 0, &font->font);
++	ftError = FT_New_Memory_Face(ftLibrary, (const FT_Byte*)data, dataSize, fontIndex, &font->font);
+ 	return ftError == 0;
+ }
+ 
+@@ -194,7 +194,7 @@ void fons__tt_getFontVMetrics(FONSttFontImpl *font, int *ascent, int *descent, i
+ 
+ float fons__tt_getPixelHeightScale(FONSttFontImpl *font, float size)
+ {
+-	return size / (font->font->ascender - font->font->descender);
++	return size / font->font->units_per_EM;
+ }
+ 
+ int fons__tt_getGlyphIndex(FONSttFontImpl *font, int codepoint)
+@@ -210,9 +210,9 @@ int fons__tt_buildGlyphBitmap(FONSttFontImpl *font, int glyph, float size, float
+ 	FT_Fixed advFixed;
+ 	FONS_NOTUSED(scale);
+ 
+-	ftError = FT_Set_Pixel_Sizes(font->font, 0, (FT_UInt)(size * (float)font->font->units_per_EM / (float)(font->font->ascender - font->font->descender)));
++	ftError = FT_Set_Pixel_Sizes(font->font, 0, size);
+ 	if (ftError) return 0;
+-	ftError = FT_Load_Glyph(font->font, glyph, FT_LOAD_RENDER | FT_LOAD_FORCE_AUTOHINT);
++	ftError = FT_Load_Glyph(font->font, glyph, FT_LOAD_RENDER | FT_LOAD_FORCE_AUTOHINT | FT_LOAD_TARGET_LIGHT);
+ 	if (ftError) return 0;
+ 	ftError = FT_Get_Advance(font->font, glyph, FT_LOAD_NO_SCALE, &advFixed);
+ 	if (ftError) return 0;
+@@ -231,7 +231,7 @@ void fons__tt_renderGlyphBitmap(FONSttFontImpl *font, unsigned char *output, int
+ {
+ 	FT_GlyphSlot ftGlyph = font->font->glyph;
+ 	int ftGlyphOffset = 0;
+-	int x, y;
++	unsigned int x, y;
+ 	FONS_NOTUSED(outWidth);
+ 	FONS_NOTUSED(outHeight);
+ 	FONS_NOTUSED(scaleX);
+@@ -277,13 +277,18 @@ int fons__tt_done(FONScontext *context)
+ 	return 1;
+ }
+ 
+-int fons__tt_loadFont(FONScontext *context, FONSttFontImpl *font, unsigned char *data, int dataSize)
++int fons__tt_loadFont(FONScontext *context, FONSttFontImpl *font, unsigned char *data, int dataSize, int fontIndex)
+ {
+-	int stbError;
++	int offset, stbError;
+ 	FONS_NOTUSED(dataSize);
+ 
+ 	font->font.userdata = context;
+-	stbError = stbtt_InitFont(&font->font, data, 0);
++	offset = stbtt_GetFontOffsetForIndex(data, fontIndex);
++	if (offset == -1) {
++		stbError = 0;
++	} else {
++		stbError = stbtt_InitFont(&font->font, data, offset);
++	}
+ 	return stbError;
+ }
+ 
+@@ -294,7 +299,7 @@ void fons__tt_getFontVMetrics(FONSttFontImpl *font, int *ascent, int *descent, i
+ 
+ float fons__tt_getPixelHeightScale(FONSttFontImpl *font, float size)
+ {
+-	return stbtt_ScaleForPixelHeight(&font->font, size);
++	return stbtt_ScaleForMappingEmToPixels(&font->font, size);
+ }
+ 
+ int fons__tt_getGlyphIndex(FONSttFontImpl *font, int codepoint)
+@@ -787,6 +792,17 @@ int fonsAddFallbackFont(FONScontext* stash, int base, int fallback)
+ 	return 0;
+ }
+ 
++void fonsResetFallbackFont(FONScontext* stash, int base)
++{
++	int i;
++
++	FONSfont* baseFont = stash->fonts[base];
++	baseFont->nfallbacks = 0;
++	baseFont->nglyphs = 0;
++	for (i = 0; i < FONS_HASH_LUT_SIZE; i++)
++		baseFont->lut[i] = -1;
++}
++
+ void fonsSetSize(FONScontext* stash, float size)
+ {
+ 	fons__getState(stash)->size = size;
+@@ -885,7 +901,7 @@ error:
+ 	return FONS_INVALID;
+ }
+ 
+-int fonsAddFont(FONScontext* stash, const char* name, const char* path)
++int fonsAddFont(FONScontext* stash, const char* name, const char* path, int fontIndex)
+ {
+ 	FILE* fp = 0;
+ 	int dataSize = 0;
+@@ -905,7 +921,7 @@ int fonsAddFont(FONScontext* stash, const char* name, const char* path)
+ 	fp = 0;
+ 	if (readed != (size_t)dataSize) goto error;
+ 
+-	return fonsAddFontMem(stash, name, data, dataSize, 1);
++	return fonsAddFontMem(stash, name, data, dataSize, 1, fontIndex);
+ 
+ error:
+ 	if (data) NVG_FREE(data);
+@@ -913,7 +929,7 @@ error:
+ 	return FONS_INVALID;
+ }
+ 
+-int fonsAddFontMem(FONScontext* stash, const char* name, unsigned char* data, int dataSize, int freeData)
++int fonsAddFontMem(FONScontext* stash, const char* name, unsigned char* data, int dataSize, int freeData, int fontIndex)
+ {
+ 	int i, ascent, descent, fh, lineGap;
+ 	FONSfont* font;
+@@ -938,15 +954,16 @@ int fonsAddFontMem(FONScontext* stash, const char* name, unsigned char* data, in
+ 
+ 	// Init font
+ 	stash->nscratch = 0;
+-	if (!fons__tt_loadFont(stash, &font->font, data, dataSize)) goto error;
++	if (!fons__tt_loadFont(stash, &font->font, data, dataSize, fontIndex)) goto error;
+ 
+ 	// Store normalized line height. The real line height is got
+ 	// by multiplying the lineh by font size.
+ 	fons__tt_getFontVMetrics( &font->font, &ascent, &descent, &lineGap);
++	ascent += lineGap;
+ 	fh = ascent - descent;
+ 	font->ascender = (float)ascent / (float)fh;
+ 	font->descender = (float)descent / (float)fh;
+-	font->lineh = (float)(fh + lineGap) / (float)fh;
++	font->lineh = font->ascender - font->descender;
+ 
+ 	return idx;
+ 
+@@ -1203,8 +1220,8 @@ static void fons__getQuad(FONScontext* stash, FONSfont* font,
+ 	y1 = (float)(glyph->y1-1);
+ 
+ 	if (stash->params.flags & FONS_ZERO_TOPLEFT) {
+-		rx = (float)(int)(*x + xoff);
+-		ry = (float)(int)(*y + yoff);
++		rx = floorf(*x + xoff);
++		ry = floorf(*y + yoff);
+ 
+ 		q->x0 = rx;
+ 		q->y0 = ry;
+@@ -1216,8 +1233,8 @@ static void fons__getQuad(FONScontext* stash, FONSfont* font,
+ 		q->s1 = x1 * stash->itw;
+ 		q->t1 = y1 * stash->ith;
+ 	} else {
+-		rx = (float)(int)(*x + xoff);
+-		ry = (float)(int)(*y - yoff);
++		rx = floorf(*x + xoff);
++		ry = floorf(*y - yoff);
+ 
+ 		q->x0 = rx;
+ 		q->y0 = ry;
+@@ -1638,8 +1655,8 @@ void fonsDeleteInternal(FONScontext* stash)
+ 	if (stash->fonts) NVG_FREE(stash->fonts);
+ 	if (stash->texData) NVG_FREE(stash->texData);
+ 	if (stash->scratch) NVG_FREE(stash->scratch);
+-	NVG_FREE(stash);
+ 	fons__tt_done(stash);
++	NVG_FREE(stash);
+ }
+ 
+ void fonsSetErrorCallback(FONScontext* stash, void (*callback)(void* uptr, int error, int val), void* uptr)
+diff --git a/modules/lwjgl/nanovg/src/main/c/nanovg.c b/modules/lwjgl/nanovg/src/main/c/nanovg.c
+index 32a81262a..a76bbdea3 100644
+--- a/modules/lwjgl/nanovg/src/main/c/nanovg.c
++++ b/modules/lwjgl/nanovg/src/main/c/nanovg.c
+@@ -24,7 +24,11 @@
+ #include "nanovg.h"
+ #define FONTSTASH_IMPLEMENTATION
+ #include "fontstash.h"
++
++#ifndef NVG_NO_STB
++//#define STB_IMAGE_IMPLEMENTATION
+ #include "stb_image.h"
++#endif
+ 
+ #ifdef _MSC_VER
+ #pragma warning(disable: 4100)  // unreferenced formal parameter
+@@ -787,6 +791,7 @@ void nvgFillPaint(NVGcontext* ctx, NVGpaint paint)
+ 	nvgTransformMultiply(state->fill.xform, state->xform);
+ }
+ 
++#ifndef NVG_NO_STB
+ int nvgCreateImage(NVGcontext* ctx, const char* filename, int imageFlags)
+ {
+ 	int w, h, n, image;
+@@ -815,6 +820,7 @@ int nvgCreateImageMem(NVGcontext* ctx, int imageFlags, unsigned char* data, int
+ 	stbi_image_free(img);
+ 	return image;
+ }
++#endif
+ 
+ int nvgCreateImageRGBA(NVGcontext* ctx, int w, int h, int imageFlags, const unsigned char* data)
+ {
+@@ -2286,14 +2292,24 @@ void nvgStroke(NVGcontext* ctx)
+ }
+ 
+ // Add fonts
+-int nvgCreateFont(NVGcontext* ctx, const char* name, const char* path)
++int nvgCreateFont(NVGcontext* ctx, const char* name, const char* filename)
++{
++	return fonsAddFont(ctx->fs, name, filename, 0);
++}
++
++int nvgCreateFontAtIndex(NVGcontext* ctx, const char* name, const char* filename, const int fontIndex)
+ {
+-	return fonsAddFont(ctx->fs, name, path);
++	return fonsAddFont(ctx->fs, name, filename, fontIndex);
+ }
+ 
+ int nvgCreateFontMem(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData)
+ {
+-	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData);
++	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData, 0);
++}
++
++int nvgCreateFontMemAtIndex(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData, const int fontIndex)
++{
++	return fonsAddFontMem(ctx->fs, name, data, ndata, freeData, fontIndex);
+ }
+ 
+ int nvgFindFont(NVGcontext* ctx, const char* name)
+@@ -2314,6 +2330,16 @@ int nvgAddFallbackFont(NVGcontext* ctx, const char* baseFont, const char* fallba
+ 	return nvgAddFallbackFontId(ctx, nvgFindFont(ctx, baseFont), nvgFindFont(ctx, fallbackFont));
+ }
+ 
++void nvgResetFallbackFontsId(NVGcontext* ctx, int baseFont)
++{
++	fonsResetFallbackFont(ctx->fs, baseFont);
++}
++
++void nvgResetFallbackFonts(NVGcontext* ctx, const char* baseFont)
++{
++	nvgResetFallbackFontsId(ctx, nvgFindFont(ctx, baseFont));
++}
++
+ // State setting
+ void nvgFontSize(NVGcontext* ctx, float size)
+ {
+@@ -2422,12 +2448,18 @@ static void nvg__renderText(NVGcontext* ctx, NVGvertex* verts, int nverts)
+ 	paint.innerColor.a *= state->alpha;
+ 	paint.outerColor.a *= state->alpha;
+ 
+-	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &state->scissor, verts, nverts);
++	ctx->params.renderTriangles(ctx->params.userPtr, &paint, state->compositeOperation, &state->scissor, verts, nverts, ctx->fringeWidth);
+ 
+ 	ctx->drawCallCount++;
+ 	ctx->textTriCount += nverts/3;
+ }
+ 
++static int nvg__isTransformFlipped(const float *xform)
++{
++	float det = xform[0] * xform[3] - xform[2] * xform[1];
++	return( det < 0);
++}
++
+ float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char* end)
+ {
+ 	NVGstate* state = nvg__getState(ctx);
+@@ -2438,6 +2470,7 @@ float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char*
+ 	float invscale = 1.0f / scale;
+ 	int cverts = 0;
+ 	int nverts = 0;
++	int isFlipped = nvg__isTransformFlipped(state->xform);
+ 
+ 	if (end == NULL)
+ 		end = string + strlen(string);
+@@ -2471,6 +2504,12 @@ float nvgText(NVGcontext* ctx, float x, float y, const char* string, const char*
+ 				break;
+ 		}
+ 		prevIter = iter;
++		if(isFlipped) {
++			float tmp;
++
++			tmp = q.y0; q.y0 = q.y1; q.y1 = tmp;
++			tmp = q.t0; q.t0 = q.t1; q.t1 = tmp;
++		}
+ 		// Transform corners.
+ 		nvgTransformPoint(&c[0],&c[1], state->xform, q.x0*invscale, q.y0*invscale);
+ 		nvgTransformPoint(&c[2],&c[3], state->xform, q.x1*invscale, q.y0*invscale);
+@@ -2683,7 +2722,7 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
+ 					rowStartX = iter.x;
+ 					rowStart = iter.str;
+ 					rowEnd = iter.next;
+-					rowWidth = iter.nextx - rowStartX; // q.x1 - rowStartX;
++					rowWidth = iter.nextx - rowStartX;
+ 					rowMinX = q.x0 - rowStartX;
+ 					rowMaxX = q.x1 - rowStartX;
+ 					wordStart = iter.str;
+@@ -2713,7 +2752,7 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
+ 				if ((ptype == NVG_SPACE && (type == NVG_CHAR || type == NVG_CJK_CHAR)) || type == NVG_CJK_CHAR) {
+ 					wordStart = iter.str;
+ 					wordStartX = iter.x;
+-					wordMinX = q.x0 - rowStartX;
++					wordMinX = q.x0;
+ 				}
+ 
+ 				// Break to new line when a character is beyond break width.
+@@ -2750,13 +2789,13 @@ int nvgTextBreakLines(NVGcontext* ctx, const char* string, const char* end, floa
+ 						nrows++;
+ 						if (nrows >= maxRows)
+ 							return nrows;
++						// Update row
+ 						rowStartX = wordStartX;
+ 						rowStart = wordStart;
+ 						rowEnd = iter.next;
+ 						rowWidth = iter.nextx - rowStartX;
+-						rowMinX = wordMinX;
++						rowMinX = wordMinX - rowStartX;
+ 						rowMaxX = q.x1 - rowStartX;
+-						// No change to the word start
+ 					}
+ 					// Set null break point
+ 					breakEnd = rowStart;
+diff --git a/modules/lwjgl/nanovg/src/main/c/nanovg.h b/modules/lwjgl/nanovg/src/main/c/nanovg.h
+index 2255d6a64..cb63e52e1 100644
+--- a/modules/lwjgl/nanovg/src/main/c/nanovg.h
++++ b/modules/lwjgl/nanovg/src/main/c/nanovg.h
+@@ -414,7 +414,7 @@ NVGpaint nvgBoxGradient(NVGcontext* ctx, float x, float y, float w, float h,
+ NVGpaint nvgRadialGradient(NVGcontext* ctx, float cx, float cy, float inr, float outr,
+ 						   NVGcolor icol, NVGcolor ocol);
+ 
+-// Creates and returns an image patter. Parameters (ox,oy) specify the left-top location of the image pattern,
++// Creates and returns an image pattern. Parameters (ox,oy) specify the left-top location of the image pattern,
+ // (ex,ey) the size of one image, angle rotation around the top-left corner, image is handle to the image to render.
+ // The gradient is transformed by the current transform when it is passed to nvgFillPaint() or nvgStrokePaint().
+ NVGpaint nvgImagePattern(NVGcontext* ctx, float ox, float oy, float ex, float ey,
+@@ -546,10 +546,16 @@ void nvgStroke(NVGcontext* ctx);
+ // Returns handle to the font.
+ int nvgCreateFont(NVGcontext* ctx, const char* name, const char* filename);
+ 
++// fontIndex specifies which font face to load from a .ttf/.ttc file.
++int nvgCreateFontAtIndex(NVGcontext* ctx, const char* name, const char* filename, const int fontIndex);
++
+ // Creates font by loading it from the specified memory chunk.
+ // Returns handle to the font.
+ int nvgCreateFontMem(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData);
+ 
++// fontIndex specifies which font face to load from a .ttf/.ttc file.
++int nvgCreateFontMemAtIndex(NVGcontext* ctx, const char* name, unsigned char* data, int ndata, int freeData, const int fontIndex);
++
+ // Finds a loaded font of specified name, and returns handle to it, or -1 if the font is not found.
+ int nvgFindFont(NVGcontext* ctx, const char* name);
+ 
+@@ -559,6 +565,12 @@ int nvgAddFallbackFontId(NVGcontext* ctx, int baseFont, int fallbackFont);
+ // Adds a fallback font by name.
+ int nvgAddFallbackFont(NVGcontext* ctx, const char* baseFont, const char* fallbackFont);
+ 
++// Resets fallback fonts by handle.
++void nvgResetFallbackFontsId(NVGcontext* ctx, int baseFont);
++
++// Resets fallback fonts by name.
++void nvgResetFallbackFonts(NVGcontext* ctx, const char* baseFont);
++
+ // Sets the font size of current text style.
+ void nvgFontSize(NVGcontext* ctx, float size);
+ 
+@@ -658,7 +670,7 @@ struct NVGparams {
+ 	void (*renderFlush)(void* uptr);
+ 	void (*renderFill)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, const float* bounds, const NVGpath* paths, int npaths);
+ 	void (*renderStroke)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, float fringe, float strokeWidth, const NVGpath* paths, int npaths);
+-	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts);
++	void (*renderTriangles)(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor, const NVGvertex* verts, int nverts, float fringe);
+ 	void (*renderDelete)(void* uptr);
+ };
+ typedef struct NVGparams NVGparams;
+diff --git a/modules/lwjgl/nanovg/src/main/c/nanovg_gl.h b/modules/lwjgl/nanovg/src/main/c/nanovg_gl.h
+index cf5a2ddc8..cabe0bfdc 100644
+--- a/modules/lwjgl/nanovg/src/main/c/nanovg_gl.h
++++ b/modules/lwjgl/nanovg/src/main/c/nanovg_gl.h
+@@ -481,6 +481,8 @@ struct GLNVGcontext {
+ 	GLNVGblend blendFunc;
+ 	#endif
+ 
++	int dummyTex;
++
+ 	// Function pointers
+ 	glActiveTexturePROC ActiveTexture;
+ 	glAttachShaderPROC AttachShader;
+@@ -781,6 +783,8 @@ static void glnvg__getUniforms(GLNVGcontext* gl, GLNVGshader* shader)
+ #endif
+ }
+ 
++static int glnvg__renderCreateTexture(void* uptr, int type, int w, int h, int imageFlags, const unsigned char* data);
++
+ static int glnvg__renderCreate(void* uptr)
+ {
+ 	GLNVGcontext* gl = (GLNVGcontext*)uptr;
+@@ -989,6 +993,10 @@ static int glnvg__renderCreate(void* uptr)
+ #endif
+ 	gl->fragSize = sizeof(GLNVGfragUniforms) + align - sizeof(GLNVGfragUniforms) % align;
+ 
++	// Some platforms does not allow to have samples to unset textures.
++    // Create empty one which is bound when there's no texture specified.
++    gl->dummyTex = glnvg__renderCreateTexture(gl, NVG_TEXTURE_ALPHA, 1, 1, 0, NULL);
++
+ 	glnvg__checkError(gl, "create done");
+ 
+ 	glFinish();
+@@ -1262,6 +1270,7 @@ static GLNVGfragUniforms* nvg__fragUniformPtr(GLNVGcontext* gl, int i);
+ 
+ static void glnvg__setUniforms(GLNVGcontext* gl, int uniformOffset, int image)
+ {
++    GLNVGtexture* tex = NULL;
+ #if NANOVG_GL_USE_UNIFORMBUFFER
+ 	glBindBufferRange(GL_UNIFORM_BUFFER, GLNVG_FRAG_BINDING, gl->fragBuf, uniformOffset, sizeof(GLNVGfragUniforms));
+ #else
+@@ -1270,12 +1279,14 @@ static void glnvg__setUniforms(GLNVGcontext* gl, int uniformOffset, int image)
+ #endif
+ 
+ 	if (image != 0) {
+-		GLNVGtexture* tex = glnvg__findTexture(gl, image);
+-		glnvg__bindTexture(gl, tex != NULL ? tex->tex : 0);
+-		glnvg__checkError(gl, "tex paint tex");
+-	} else {
+-		glnvg__bindTexture(gl, 0);
+-	}
++        tex = glnvg__findTexture(gl, image);
++    }
++    // If no image is set, use empty texture
++    if (tex == NULL) {
++        tex = glnvg__findTexture(gl, gl->dummyTex);
++    }
++    glnvg__bindTexture(gl, tex != NULL ? tex->tex : 0);
++    glnvg__checkError(gl, "tex paint tex");
+ }
+ 
+ static void glnvg__renderViewport(void* uptr, float width, float height, float devicePixelRatio)
+@@ -1770,7 +1781,7 @@ error:
+ }
+ 
+ static void glnvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOperationState compositeOperation, NVGscissor* scissor,
+-								   const NVGvertex* verts, int nverts)
++								   const NVGvertex* verts, int nverts, float fringe)
+ {
+ 	GLNVGcontext* gl = (GLNVGcontext*)uptr;
+ 	GLNVGcall* call = glnvg__allocCall(gl);
+@@ -1793,7 +1804,7 @@ static void glnvg__renderTriangles(void* uptr, NVGpaint* paint, NVGcompositeOper
+ 	call->uniformOffset = glnvg__allocFragUniforms(gl, 1);
+ 	if (call->uniformOffset == -1) goto error;
+ 	frag = nvg__fragUniformPtr(gl, call->uniformOffset);
+-	glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, 1.0f, -1.0f);
++	glnvg__convertPaint(gl, frag, paint, scissor, 1.0f, fringe, -1.0f);
+ 	frag->type = NSVG_SHADER_IMG;
+ 
+ 	return;
