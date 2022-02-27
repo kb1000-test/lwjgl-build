@@ -77,8 +77,8 @@ jobs:
       - name: upload natives
         uses: actions/upload-artifact@v2
         with:
-          name: bin-${{ matrix.version }}
-          path: lwjgl3/lwjgl3/lwjgl-bin/**
+          name: lwjgl-build-${{ matrix.version }}
+          path: lwjgl3/lwjgl3/lwjgl-build/**
 
   lwjgl3-release:
     needs: lwjgl3
@@ -118,5 +118,11 @@ jobs:
         with:
           distribution: zulu
           java-version: 10
+      - name: download natives
+        uses: actions/download-artifact@v2
+        with:
+          name: lwjgl-build-${{ matrix.version }}
+          path: lwjgl3/lwjgl3/lwjgl-build
       - name: package
-        run: ant release -Dbuild.revision=10-kb1000
+        working-directory: lwjgl3/lwjgl3
+        run: ant release -Dbuild.revision=10-kb1000 -Dbuild.version=${{ matrix.version }}

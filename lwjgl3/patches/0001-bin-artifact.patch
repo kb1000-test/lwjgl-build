@@ -1,5 +1,5 @@
 diff --git a/build.xml b/build.xml
-index 29c2c2f95..e248f56e1 100644
+index 29c2c2f95..5d1f1c340 100644
 --- a/build.xml
 +++ b/build.xml
 @@ -798,20 +798,6 @@
@@ -36,8 +36,8 @@ index 29c2c2f95..e248f56e1 100644
 -            <arg value="s3://build.lwjgl.org/${build.type}/${platform.remote}/${build.arch}/"/>
 -            <arg line='--acl public-read --cache-control "public, must-revalidate, proxy-revalidate, max-age=0"'/>
 -
-+        <mkdir dir="lwjgl-bin/${build.type}/${platform.remote}/${build.arch}/"/>
-+        <copy todir="lwjgl-bin/${build.type}/${platform.remote}/${build.arch}/" flatten="true" failonerror="true" taskname="bin artifact preparation">
++        <mkdir dir="lwjgl-build/${build.type}/${platform.remote}/${build.arch}/"/>
++        <copy todir="lwjgl-build/${build.type}/${platform.remote}/${build.arch}/" flatten="true" failonerror="true" taskname="bin artifact preparation">
              <fileset dir=".">
                  <include name="${lib}/${libraries}"/>
                  <exclude name="${lib}/${exclude_libraries}" if:set="exclude_libraries"/>
@@ -47,3 +47,21 @@ index 29c2c2f95..e248f56e1 100644
      </target>
  
      <macrodef name="get-release-offline">
+@@ -876,7 +855,16 @@
+         <attribute name="dest" default=""/>
+ 
+         <sequential>
+-            <get src="https://build.lwjgl.org/${build.type}/@{url}" dest="${release}/${module}/native@{dest}" verbose="false" usetimestamp="true" unless:true="${build.offline}"/>
++            <local name="url.actual"/>
++            <local name="file.path"/>
++            <local name="file.available"/>
++
++            <property name="file.path" location="lwjgl-build/${build.type}/@{url}"/>
++            <available property="file.available" file="${file.path}"/>
++            <makeurl property="url.actual" file="${file.path}" if:set="file.available"/>
++            <property name="url.actual" value="https://build.lwjgl.org/${build.type}/@{url}" unless:set="file.available"/>
++
++            <get src="${url.actual}" dest="${release}/${module}/native@{dest}" verbose="false" usetimestamp="true" unless:true="${build.offline}"/>
+             <get-release-offline url="@{url}" dest="@{dest}" if:true="${build.offline}"/>
+         </sequential>
+     </macrodef>
