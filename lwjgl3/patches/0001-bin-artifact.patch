@@ -1,0 +1,49 @@
+diff --git a/build.xml b/build.xml
+index 29c2c2f95..e248f56e1 100644
+--- a/build.xml
++++ b/build.xml
+@@ -798,20 +798,6 @@
+     </target>
+ 
+     <target name="upload-native" description="Uploads native build artifacts to build.lwjgl.org" depends="compile-native">
+-        <fail message="AWS credentials not configured.">
+-            <condition>
+-                <not>
+-                    <or>
+-                        <and>
+-                            <isset property="env.AWS_ACCESS_KEY_ID"/>
+-                            <isset property="env.AWS_SECRET_ACCESS_KEY"/>
+-                        </and>
+-                        <isset property="env.AWS_CONFIG_FILE"/>
+-                    </or>
+-                </not>
+-            </condition>
+-        </fail>
+-
+         <local name="revision"/>
+         <property name="revision" value="liblwjgl.so.git" if:set="platform.linux"/>
+         <property name="revision" value="liblwjgl.dylib.git" if:set="platform.macos"/>
+@@ -837,20 +823,13 @@
+             <equals arg1="${build.arch}" arg2="x64"/>
+         </condition>
+ 
+-        <apply executable="aws" failonerror="true" relative="true" taskname="S3 upload">
+-            <arg value="s3"/>
+-            <arg value="cp"/>
+-
+-            <srcfile/>
+-
+-            <arg value="s3://build.lwjgl.org/${build.type}/${platform.remote}/${build.arch}/"/>
+-            <arg line='--acl public-read --cache-control "public, must-revalidate, proxy-revalidate, max-age=0"'/>
+-
++        <mkdir dir="lwjgl-bin/${build.type}/${platform.remote}/${build.arch}/"/>
++        <copy todir="lwjgl-bin/${build.type}/${platform.remote}/${build.arch}/" flatten="true" failonerror="true" taskname="bin artifact preparation">
+             <fileset dir=".">
+                 <include name="${lib}/${libraries}"/>
+                 <exclude name="${lib}/${exclude_libraries}" if:set="exclude_libraries"/>
+             </fileset>
+-        </apply>
++        </copy>
+     </target>
+ 
+     <macrodef name="get-release-offline">

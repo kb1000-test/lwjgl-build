@@ -23,12 +23,10 @@ jobs:
     steps:
       - name: checkout repository
         uses: actions/checkout@v2
-      - run: echo ${{ runner.os }}
       - name: install dependencies (Ubuntu)
         if: ${{ runner.os == 'Linux' }}
         run: |
           sudo apt-get update
-          sudo apt-get -y upgrade
           sudo apt-get -y install libgl-dev libgtk-3-dev xorg-dev libglu-dev libgl1-mesa-glx
       - name: setup jdk 8
         uses: actions/setup-java@v2
@@ -36,7 +34,13 @@ jobs:
           distribution: zulu
           java-version: 8
       - name: clone LWJGL
-        run: git clone -b ${{ matrix.version }} --depth 1 https://github.com/LWJGL/lwjgl3.git lwjgl3/lwjgl3
+        run: |
+          git clone https://github.com/LWJGL-CI/OculusSDK.git lwjgl3/OculusSDK
+          pushd lwjgl3/OculusSDK
+          git fetch origin 21be7be6dc3b9d0199ed55c74c9e5f609e54222a
+          git checkout 21be7be6dc3b9d0199ed55c74c9e5f609e54222a
+          popd
+          git clone -b ${{ matrix.version }} --depth 10 https://github.com/LWJGL/lwjgl3.git lwjgl3/lwjgl3
       - name: patch LWJGL
         working-directory: lwjgl3
         run: ../patcher ${{ matrix.version }} ${{ runner.os }} ${{ matrix.arch }}
@@ -58,7 +62,9 @@ jobs:
       - name: run build
         working-directory: lwjgl3/lwjgl3
         if: ${{ runner.os != 'Windows' }}
-        run: ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile compile-native
+        run: |
+          ant ${{ env.SDKROOT_PROP }} compile-templates clean-generated generate compile compile-native
+          ant upload-native
       - name: run build (Windows)
         working-directory: lwjgl3/lwjgl3
         if: ${{ runner.os == 'Windows' }}
@@ -67,3 +73,50 @@ jobs:
         run: |
           call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" ${{ env.MSVC_ARCH }} -vcvars_ver=14.16
           ant compile-templates clean-generated generate compile compile-native
+          ant upload-native
+      - name: upload natives
+        uses: actions/upload-artifact@v2
+        with:
+          name: bin-${{ matrix.version }}
+          path: lwjgl3/lwjgl3/lwjgl-bin/**
+
+  lwjgl3-release:
+    needs: lwjgl3
+    strategy:
+      matrix:
+        version: [3.2.2]
+    env:
+        LWJGL_BUILD_TYPE: release/${{ matrix.version }}
+
+    runs-on: ubuntu-18.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v2
+      - name: setup jdk 8
+        uses: actions/setup-java@v2
+        with:
+          distribution: zulu
+          java-version: 8
+      - name: clone LWJGL
+        run: |
+          git clone https://github.com/LWJGL-CI/OculusSDK.git lwjgl3/OculusSDK
+          pushd lwjgl3/OculusSDK
+          git fetch origin 21be7be6dc3b9d0199ed55c74c9e5f609e54222a
+          git checkout 21be7be6dc3b9d0199ed55c74c9e5f609e54222a
+          popd
+          git clone -b ${{ matrix.version }} --depth 1 https://github.com/LWJGL/lwjgl3.git lwjgl3/lwjgl3
+      - name: patch LWJGL
+        working-directory: lwjgl3
+        run: ../patcher ${{ matrix.version }} Generic generic
+      - name: Build java
+        working-directory: lwjgl3/lwjgl3
+        run: ant compile-templates clean-generated generate compile
+      - name: setup JAVA8_HOME
+        run: echo "JAVA8_HOME=$JAVA_HOME" >> $GITHUB_ENV
+      - name: setup java 10
+        uses: actions/setup-java@v2
+        with:
+          distribution: zulu
+          java-version: 10
+      - name: package
+        run: ant release -Dbuild.revision=10-kb1000
